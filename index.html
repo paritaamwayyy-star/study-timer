@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <title>แอปจัดการการอ่านหนังสือ V3</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; background-color: #f4f7f6; color: #333; padding: 20px; }
+        .container { max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); }
+        h2 { margin-top: 0; color: #2c3e50; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        
+        /* ส่วนจับเวลา */
+        #timer { font-size: 60px; text-align: center; margin: 10px 0; font-weight: bold; color: #007bff; }
+        .btn { padding: 10px 15px; border: none; border-radius: 6px; cursor: pointer; color: white; margin: 3px; font-size: 14px; }
+        .btn-blue { background: #007bff; } .btn-green { background: #28a745; }
+        .btn-red { background: #dc3545; } .btn-gray { background: #6c757d; } .btn-small { padding: 5px 10px; font-size: 12px; }
+        
+        /* ส่วนฟอร์ม */
+        input, textarea { padding: 10px; margin: 4px 0; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; }
+        textarea { width: 100%; resize: vertical; height: 80px; }
+        .flex-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        
+        /* รายการ */
+        ul { list-style: none; padding: 0; }
+        li { background: #f9f9f9; margin: 8px 0; padding: 12px; border-radius: 6px; border-left: 4px solid #007bff; display: flex; justify-content: space-between; align-items: center; }
+        .li-content { flex-grow: 1; }
+        .note-date { font-size: 12px; color: #777; margin-bottom: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        
+        <!-- 1. ส่วนตั้งเวลา -->
+        <div class="card" style="text-align: center;">
+            <h2>⏱️ จับเวลาอ่านหนังสือ</h2>
+            <div id="timer">25:00</div>
+            <div>
+                <input type="number" id="customMinutes" placeholder="กำหนดนาที..." style="width: 120px;">
+                <button class="btn btn-blue" onclick="setCustomMode()">ตั้งเวลา</button>
+            </div>
+            <div style="margin-top: 10px;">
+                <button class="btn btn-green" onclick="startTimer()">▶️ เริ่ม</button>
+                <button class="btn btn-red" onclick="stopTimer()">⏸️ หยุด</button>
+                <button class="btn btn-gray" onclick="resetTimer()">🔄 เริ่มใหม่</button>
+            </div>
+        </div>
+
+        <!-- 2. ส่วนตารางวางแผน (แจ้งเตือน) -->
+        <div class="card">
+            <h2>📅 ตารางวางแผนการอ่าน</h2>
+            <div class="flex-row">
+                <input type="time" id="planTime">
+                <input type="text" id="planTask" placeholder="วิชาที่ต้องอ่าน" style="flex-grow: 1;">
+                <input type="number" id="planDuration" placeholder="นาที" style="width: 80px;">
+                <button class="btn btn-blue" onclick="addPlan()">เพิ่มคิว</button>
+            </div>
+            <ul id="planList"></ul>
+        </div>
+
+        <!-- 3. ส่วนบันทึกความจำ -->
+        <div class="card">
+            <h2>📝 บันทึกสรุปความรู้ (Active Recall)</h2>
+            <textarea id="noteText" placeholder="อ่านจบแล้ว สรุปเนื้อหาสั้นๆ เพื่อทบทวนความจำ..."></textarea>
+            <button class="btn btn-green" onclick="saveNote()">💾 บันทึกความรู้</button>
+            <ul id="noteList"></ul>
+        </div>
+
+    </div>
+
+    <audio id="alarmSound" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg"></audio>
+
+    <script>
+        // --- ระบบจับเวลา ---
+        let defaultTime = 25 * 60;
+        let timeLeft = defaultTime;
+        let timerId = null;
+
+        function updateDisplay() {
+            let m = Math.floor(timeLeft / 60);
+            let s = timeLeft % 60;
+            document.getElementById('timer').innerText = (m < 10 ? "0" : "") + m + ":" + (s < 10 ? "0" : "") + s;
+        }
+
+        function setCustomMode() {
+            let mins = document.getElementById('customMinutes').value;
+            if(mins > 0) {
+                applyTimeToTimer(mins);
+            }
+        }
+
+        function applyTimeToTimer(mins) {
+            stopTimer();
+            defaultTime = mins * 60;
+            timeLeft = defaultTime;
+            updateDisplay();
+            window.scrollTo(0, 0); // เลื่อนหน้าจอกลับไปบนสุด
+        }
+
+        function startTimer() {
+            if (timerId !== null) return;
+            timerId = setInterval(() => {
+                if (timeLeft > 0) {
+                    timeLeft--; updateDisplay();
+                } else {
+                    stopTimer();
+                    document.getElementById('alarmSound').play();
+                    alert("หมดเวลาแล้ว! อย่าลืมจดสรุปสิ่งที่ได้เรียนรู้ด้วยนะ 🎯");
+                }
+            }, 1000);
+        }
+
+        function stopTimer() { clearInterval(timerId); timerId = null; }
+        function resetTimer() { stopTimer(); timeLeft = defaultTime; updateDisplay(); }
+
+        // --- ระบบตารางและการแจ้งเตือน (Local Storage) ---
+        let plans = JSON.parse(localStorage.getItem('readingPlans')) || [];
+        renderPlans();
+        
+        function addPlan() {
+            let time = document.getElementById('planTime').value;
+            let task = document.getElementById('planTask').value;
+            let duration = document.getElementById('planDuration').value;
+            
+            if(time && task && duration) {
+                plans.push({ time: time, task: task, duration: duration, notified: false });
+                plans.sort((a, b) => a.time.localeCompare(b.time)); // เรียงตามเวลา
+                savePlans();
+                
+                document.getElementById('planTime').value = '';
+                document.getElementById('planTask').value = '';
+                document.getElementById('planDuration').value = '';
+            }
+        }
+
+        function removePlan(index) {
+            plans.splice(index, 1);
+            savePlans();
+        }
+
+        function savePlans() {
+            localStorage.setItem('readingPlans', JSON.stringify(plans));
+            renderPlans();
+        }
+
+        function renderPlans() {
+            let list = document.getElementById('planList');
+            list.innerHTML = '';
+            plans.forEach((p, index) => {
+                list.innerHTML += `
+                    <li>
+                        <div class="li-content">⏰ <strong>${p.time}</strong> - ${p.task} (ใช้เวลา ${p.duration} นาที)</div>
+                        <div>
+                            <button class="btn btn-green btn-small" onclick="applyTimeToTimer(${p.duration})">เริ่มจับเวลา</button>
+                            <button class="btn btn-red btn-small" onclick="removePlan(${index})">ลบ</button>
+                        </div>
+                    </li>`;
+            });
+        }
+
+        setInterval(() => {
+            let now = new Date();
+            let currentTime = (now.getHours() < 10 ? '0' : '') + now.getHours() + ':' + (now.getMinutes() < 10 ? '0' : '') + now.getMinutes();
+            
+            plans.forEach((p, index) => {
+                if(p.time === currentTime && !p.notified) {
+                    plans[index].notified = true;
+                    savePlans(); // บันทึกว่าเตือนไปแล้วจะได้ไม่เตือนซ้ำ
+                    document.getElementById('alarmSound').play();
+                    alert("🔔 ถึงเวลาอ่านวิชา: " + p.task + " แล้วครับ!");
+                }
+            });
+        }, 10000);
+
+        // --- ระบบบันทึกสรุปความรู้ (Local Storage) ---
+        let notes = JSON.parse(localStorage.getItem('readingNotes')) || [];
+        renderNotes();
+
+        function saveNote() {
+            let text = document.getElementById('noteText').value;
+            if(text) {
+                let now = new Date();
+                let dateStr = now.toLocaleDateString('th-TH') + " " + now.toLocaleTimeString('th-TH', {hour: '2-digit', minute:'2-digit'});
+                notes.unshift({ date: dateStr, text: text });
+                localStorage.setItem('readingNotes', JSON.stringify(notes));
+                document.getElementById('noteText').value = '';
+                renderNotes();
+            }
+        }
+
+        function deleteNote(index) {
+            if(confirm("ต้องการลบบันทึกนี้ใช่ไหม?")) {
+                notes.splice(index, 1);
+                localStorage.setItem('readingNotes', JSON.stringify(notes));
+                renderNotes();
+            }
+        }
+
+        function renderNotes() {
+            let list = document.getElementById('noteList');
+            list.innerHTML = '';
+            notes.forEach((n, index) => {
+                list.innerHTML += `
+                    <li>
+                        <div class="li-content">
+                            <div class="note-date">${n.date}</div>
+                            <div>${n.text}</div>
+                        </div>
+                        <button class="btn btn-red btn-small" onclick="deleteNote(${index})">ลบ</button>
+                    </li>`;
+            });
+        }
+    </script>
+</body>
+</html>
